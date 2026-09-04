@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Больше времени</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">⏳</div>
+    <div>
+      <h1>Больше времени</h1>
+      <p class="subtitle">Мелкие поручения — соседям, друг другу</p>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <nav class="tabbar">
+    <button class="tab-btn active" data-tab="feed">
+      <span>📋</span><span>Лента</span>
+    </button>
+    <button class="tab-btn" data-tab="create">
+      <span>➕</span><span>Создать</span>
+    </button>
+    <button class="tab-btn" data-tab="mine">
+      <span>🗂</span><span>Мои</span>
+    </button>
+  </nav>
+
+  <div class="sheet-overlay" id="sheet-overlay" hidden>
+    <div class="sheet" id="sheet"></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
