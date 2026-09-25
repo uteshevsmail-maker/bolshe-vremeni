@@ -51,170 +51,206 @@ function haptic(kind = 'light') {
   }
 }
 
-const CATEGORY_FALLBACK = [
-  { id: 'dog_walk', label: 'Выгулять собаку', emoji: '🐕' },
-  { id: 'pvz', label: 'Забрать с ПВЗ', emoji: '📦' },
-  { id: 'groceries', label: 'Купить продукты', emoji: '🛒' },
-  { id: 'cleaning', label: 'Уборка', emoji: '🧹' },
-  { id: 'queue', label: 'Постоять в очереди', emoji: '⏳' },
-  { id: 'other', label: 'Другое поручение', emoji: '✋' },
-];
-let categories = CATEGORY_FALLBACK;
-let selectedCategory = null;
-
-const view = document.getElementById('view');
-const tabs = document.querySelectorAll('.tab-btn');
-tabs.forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
-
-function switchTab(tab) {
-  tabs.forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  if (tab === 'feed') renderFeed();
-  if (tab === 'create') renderCreate();
-  if (tab === 'mine') renderMine();
-}
-
-function statusLabel(s) {
-  return { open: 'Открыт', in_progress: 'В работе', done: 'Выполнен', cancelled: 'Отменён' }[s] || s;
-}
-function categoryInfo(id) {
-  return categories.find((c) => c.id === id) || { label: id, emoji: '✋' };
-}
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (m) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[m]));
 }
 
-function orderCard(o, opts = {}) {
-  const { showTake = false, showManage = false } = opts;
-  const c = categoryInfo(o.category);
-  const meta = [
-    o.address ? `📍 ${escapeHtml(o.address)}` : null,
-    o.when_text ? `🕒 ${escapeHtml(o.when_text)}` : null,
-    o.price ? `💰 ${o.price} ₽` : null,
-  ].filter(Boolean).join(' · ');
+const view = document.getElementById('view');
+const tabbar = document.getElementById('tabbar');
+const appTitle = document.getElementById('app-title');
+const appSubtitle = document.getElementById('app-subtitle');
 
-  const author = o.customer_username ? '@' + o.customer_username : (o.customer_name || 'пользователь');
-  const executor = o.executor_username ? '@' + o.executor_username : o.executor_name;
+let me = null;
+let employees = [];
+let currentTab = 'assign';
+let allFilter = 'all'; // фильтр по сотруднику на вкладке «Все задачи»
+
+/* ===================== Общие штуки ===================== */
+
+const EMPLOYEE_EMOJI = { 'Рената': '🌸', 'Дарья': '🌿', 'Замир': '⚙️', 'Маден': '🚀', 'Асхат': '🛠', 'Виктория': '⭐' };
+
+function statusLabel(s) {
+  return { new: 'Новая', in_progress: 'В работе', done: 'Готово', cancelled: 'Отменена' }[s] || s;
+}
+
+function formatDeadline(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  const today = startOfDay(new Date());
+  const target = startOfDay(d);
+  const diffDays = Math.round((target - today) / 86400000);
+  let label;
+  if (diffDays === 0) label = 'сегодня';
+  else if (diffDays === 1) label = 'завтра';
+  else {
+    label = `${d.getDate()} ${MONTHS_GEN[d.getMonth()]}`;
+    if (d.getFullYear() !== today.getFullYear()) label += ` ${d.getFullYear()}`;
+  }
+  return { label, overdue: target < today };
+}
+
+function taskCard(t, opts = {}) {
+  const { showAssignee = false, canChangeStatus = false, canCancel = false } = opts;
+  const dl = formatDeadline(t.deadline);
 
   let actions = '';
-  if (showTake) {
-    actions = `<button class="btn small" data-take="${o.id}">Откликнуться</button>`;
-  } else if (showManage && (o.status === 'open' || o.status === 'in_progress')) {
-    actions = `<div class="card-actions">
-      <button class="btn small" data-done="${o.id}">Готово</button>
-      <button class="btn small ghost" data-cancel="${o.id}">Отменить</button>
-    </div>`;
+  if (canChangeStatus && (t.status === 'new' || t.status === 'in_progress')) {
+    const parts = [];
+    if (t.status === 'new') parts.push(`<button class="btn small" data-status="${t.id}:in_progress">Взять в работу</button>`);
+    parts.push(`<button class="btn small" data-status="${t.id}:done">Готово</button>`);
+    if (canCancel) parts.push(`<button class="btn small ghost" data-status="${t.id}:cancelled">Отменить</button>`);
+    actions = `<div class="card-actions">${parts.join('')}</div>`;
   }
+
+  const comments = (t.comments || []).map((c) => `
+    <div class="comment-item"><b>${escapeHtml(c.author_name)}:</b> <span class="c-text">${escapeHtml(c.text)}</span></div>
+  `).join('');
 
   return `
-    <div class="card">
+    <div class="card" data-task="${t.id}">
       <div class="card-top">
-        <span class="badge">${c.emoji} ${escapeHtml(c.label)}</span>
-        <span class="status status-${o.status}">${statusLabel(o.status)}</span>
+        ${showAssignee
+          ? `<span class="badge">${EMPLOYEE_EMOJI[t.assignee] || '👤'} ${escapeHtml(t.assignee)}</span>`
+          : `<span></span>`}
+        <span class="status status-${t.status === 'new' ? 'open' : t.status}">${statusLabel(t.status)}</span>
       </div>
-      <p class="desc">${escapeHtml(o.description)}</p>
-      ${meta ? `<p class="meta">${meta}</p>` : ''}
-      <p class="author">от ${escapeHtml(author)}${executor ? ` · исполнитель: ${escapeHtml(executor)}` : ''}</p>
+      <p class="task-title">${escapeHtml(t.title)}</p>
+      ${t.description ? `<p class="desc">${escapeHtml(t.description)}</p>` : ''}
+      ${dl ? `<p class="meta deadline ${dl.overdue && t.status !== 'done' && t.status !== 'cancelled' ? 'overdue' : ''}">📅 Срок: ${dl.label}</p>` : ''}
       ${actions}
+      <div class="comments">
+        ${comments}
+        <form class="comment-form" data-comment-form="${t.id}">
+          <input type="text" placeholder="Написать комментарий…" required />
+          <button type="submit" class="btn small">➤</button>
+        </form>
+      </div>
     </div>`;
 }
 
-async function renderFeed() {
-  view.innerHTML = '<p class="loading">Загрузка…</p>';
-  try {
-    const orders = await api('/orders?scope=open');
-    if (!orders.length) {
-      view.innerHTML = '<p class="empty">Пока нет открытых заказов.<br>Стань первым — вкладка «Создать».</p>';
-      return;
-    }
-    view.innerHTML = `<div class="list">${orders.map((o) => orderCard(o, { showTake: true })).join('')}</div>`;
-    view.querySelectorAll('[data-take]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        try {
-          await api(`/orders/${btn.dataset.take}/take`, { method: 'POST' });
-          haptic('success');
-          showToast('Вы откликнулись на заказ!');
-          renderFeed();
-        } catch (e) {
-          haptic('error');
-          showToast(e.message);
-        }
-      });
+function bindTaskCardEvents(container, onChanged) {
+  container.querySelectorAll('[data-status]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const [id, status] = btn.dataset.status.split(':');
+      try {
+        await api(`/tasks/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) });
+        haptic('success');
+        showToast(status === 'done' ? 'Отмечено как выполнено' : status === 'cancelled' ? 'Задача отменена' : 'Взято в работу');
+        onChanged();
+      } catch (e) {
+        haptic('error');
+        showToast(e.message);
+      }
     });
-  } catch (e) {
-    view.innerHTML = `<p class="empty">Ошибка: ${escapeHtml(e.message)}</p>`;
-  }
+  });
+  container.querySelectorAll('[data-comment-form]').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = form.dataset.commentForm;
+      const input = form.querySelector('input');
+      const text = input.value.trim();
+      if (!text) return;
+      try {
+        await api(`/tasks/${id}/comment`, { method: 'POST', body: JSON.stringify({ text }) });
+        haptic('light');
+        input.value = '';
+        onChanged();
+      } catch (e2) {
+        haptic('error');
+        showToast(e2.message);
+      }
+    });
+  });
 }
 
-/* ===================== Создание заказа ===================== */
+/* ===================== Онбординг: выбор сотрудника ===================== */
 
-async function renderCreate() {
-  try {
-    categories = await api('/categories');
-  } catch {
-    // используем CATEGORY_FALLBACK
-  }
-  selectedCategory = selectedCategory || categories[0].id;
+function renderOnboarding() {
+  view.innerHTML = `
+    <div class="onboarding">
+      <div class="big-emoji">👋</div>
+      <h2>Кто вы?</h2>
+      <p>Выберите своё имя из списка — это нужно, чтобы показывать именно ваши задачи.</p>
+      <div class="name-grid">
+        ${employees.map((n) => `<button type="button" class="name-btn" data-pick="${escapeHtml(n)}">${EMPLOYEE_EMOJI[n] || '👤'} ${escapeHtml(n)}</button>`).join('')}
+      </div>
+    </div>`;
+  view.querySelectorAll('[data-pick]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        await api('/me/employee', { method: 'POST', body: JSON.stringify({ employee_name: btn.dataset.pick }) });
+        haptic('success');
+        await boot();
+      } catch (e) {
+        haptic('error');
+        showToast(e.message);
+      }
+    });
+  });
+}
 
+/* ===================== Директор: раздать задачу ===================== */
+
+let selectedAssignee = null;
+
+async function renderAssign() {
+  selectedAssignee = selectedAssignee || employees[0];
   view.innerHTML = `
     <div class="cat-grid">
-      ${categories.map((c) => `
-        <button type="button" class="cat-btn ${c.id === selectedCategory ? 'selected' : ''}" data-cat="${c.id}">
-          <span class="cat-emoji">${c.emoji}</span>
-          <span>${escapeHtml(c.label)}</span>
+      ${employees.map((n) => `
+        <button type="button" class="cat-btn ${n === selectedAssignee ? 'selected' : ''}" data-assignee="${escapeHtml(n)}">
+          <span class="cat-emoji">${EMPLOYEE_EMOJI[n] || '👤'}</span>
+          <span>${escapeHtml(n)}</span>
         </button>`).join('')}
     </div>
-    <form id="order-form" class="form">
+    <form id="task-form" class="form">
       <label>Что нужно сделать
-        <textarea name="description" placeholder="Опишите поручение подробнее" required></textarea>
+        <input name="title" placeholder="Название задачи" required />
       </label>
-      <label>Адрес
-        <input name="address" placeholder="Куда прийти" />
+      <label>Подробности
+        <textarea name="description" placeholder="Необязательно"></textarea>
       </label>
-      <label>Когда
+      <label>Срок
         <button type="button" id="when-field" class="field-btn">
-          <span id="when-field-text" class="placeholder">Выбрать дату и время</span>
+          <span id="when-field-text" class="placeholder">Без срока</span>
           <span class="chev">📅</span>
         </button>
       </label>
-      <label>Бюджет, ₽
-        <input name="price" type="number" min="0" placeholder="Необязательно" />
-      </label>
-      <button type="submit" class="btn primary">Опубликовать заказ</button>
+      <button type="submit" class="btn primary">Поставить задачу</button>
     </form>
   `;
 
-  view.querySelectorAll('[data-cat]').forEach((btn) => {
+  view.querySelectorAll('[data-assignee]').forEach((btn) => {
     btn.addEventListener('click', () => {
       haptic('light');
-      selectedCategory = btn.dataset.cat;
-      view.querySelectorAll('[data-cat]').forEach((b) => b.classList.toggle('selected', b === btn));
+      selectedAssignee = btn.dataset.assignee;
+      view.querySelectorAll('[data-assignee]').forEach((b) => b.classList.toggle('selected', b === btn));
     });
   });
 
-  document.getElementById('when-field').addEventListener('click', openDateTimeSheet);
+  document.getElementById('when-field').addEventListener('click', openDeadlineSheet);
   updateWhenFieldDisplay();
 
-  document.getElementById('order-form').addEventListener('submit', async (e) => {
+  document.getElementById('task-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
-      await api('/orders', {
+      await api('/tasks', {
         method: 'POST',
         body: JSON.stringify({
-          category: selectedCategory,
+          assignee: selectedAssignee,
+          title: fd.get('title'),
           description: fd.get('description'),
-          address: fd.get('address'),
-          when_text: formatSelectedDateTime() || '',
-          price: fd.get('price') || null,
+          deadline: dtState.date ? dtState.date.toISOString() : null,
         }),
       });
       haptic('success');
-      showToast('Заказ опубликован!');
+      showToast('Задача поставлена!');
       e.target.reset();
-      resetDateTimeState();
-      switchTab('feed');
+      resetDeadlineState();
+      switchTab('all');
     } catch (err) {
       haptic('error');
       showToast(err.message);
@@ -222,96 +258,72 @@ async function renderCreate() {
   });
 }
 
-/* ===================== Выбор даты и времени ===================== */
+/* ===================== Выбор срока (дедлайна) ===================== */
 
 const WEEKDAYS_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const MONTHS_NOM = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-const TIME_PRESETS = ['09:00', '12:00', '15:00', '18:00', '20:00'];
 
-let dtState = { mode: null, date: null, time: null }; // mode: 'asap' | 'date' | null
+let dtState = { date: null };
 let calViewMonth = startOfMonth(new Date());
 
-function startOfMonth(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-function startOfDay(d) {
-  const c = new Date(d);
-  c.setHours(0, 0, 0, 0);
-  return c;
-}
-function isSameDay(a, b) {
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-function addDays(d, n) {
-  const c = new Date(d);
-  c.setDate(c.getDate() + n);
-  return c;
-}
+function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+function startOfDay(d) { const c = new Date(d); c.setHours(0, 0, 0, 0); return c; }
+function isSameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+function addDays(d, n) { const c = new Date(d); c.setDate(c.getDate() + n); return c; }
 
-function resetDateTimeState() {
-  dtState = { mode: null, date: null, time: null };
+function resetDeadlineState() {
+  dtState = { date: null };
   calViewMonth = startOfMonth(new Date());
 }
 
-function formatSelectedDateTime() {
-  if (dtState.mode === 'asap') return 'Как можно скорее';
+function formatSelectedDeadline() {
   if (!dtState.date) return null;
-
   const today = startOfDay(new Date());
   const tomorrow = addDays(today, 1);
-
-  let datePart;
-  if (isSameDay(dtState.date, today)) datePart = 'сегодня';
-  else if (isSameDay(dtState.date, tomorrow)) datePart = 'завтра';
-  else {
-    const wd = WEEKDAYS_SHORT[(dtState.date.getDay() + 6) % 7];
-    datePart = `${wd}, ${dtState.date.getDate()} ${MONTHS_GEN[dtState.date.getMonth()]}`;
-  }
-  return dtState.time ? `${datePart} · ${dtState.time}` : datePart;
+  if (isSameDay(dtState.date, today)) return 'Сегодня';
+  if (isSameDay(dtState.date, tomorrow)) return 'Завтра';
+  const wd = WEEKDAYS_SHORT[(dtState.date.getDay() + 6) % 7];
+  return `${wd}, ${dtState.date.getDate()} ${MONTHS_GEN[dtState.date.getMonth()]}`;
 }
 
 function updateWhenFieldDisplay() {
   const el = document.getElementById('when-field-text');
   if (!el) return;
-  const label = formatSelectedDateTime();
-  el.textContent = label ? label[0].toUpperCase() + label.slice(1) : 'Выбрать дату и время';
+  const label = formatSelectedDeadline();
+  el.textContent = label || 'Без срока';
   el.classList.toggle('placeholder', !label);
 }
 
-function openDateTimeSheet() {
-  renderSheet();
+function openDeadlineSheet() {
+  renderDeadlineSheet();
   const overlay = document.getElementById('sheet-overlay');
   overlay.hidden = false;
   requestAnimationFrame(() => overlay.classList.add('show'));
 }
-
-function closeDateTimeSheet() {
+function closeDeadlineSheet() {
   const overlay = document.getElementById('sheet-overlay');
   overlay.classList.remove('show');
   setTimeout(() => { overlay.hidden = true; }, 250);
 }
 
-function renderSheet() {
+function renderDeadlineSheet() {
   const sheet = document.getElementById('sheet');
   const today = startOfDay(new Date());
   const tomorrow = addDays(today, 1);
   const isCurrentMonth = calViewMonth.getFullYear() === today.getFullYear() && calViewMonth.getMonth() === today.getMonth();
 
-  // сетка дней месяца, понедельник — первый день недели
   const firstDay = calViewMonth;
   const daysInMonth = new Date(firstDay.getFullYear(), firstDay.getMonth() + 1, 0).getDate();
   const leadingBlanks = (firstDay.getDay() + 6) % 7;
 
   let dayCells = '';
-  for (let i = 0; i < leadingBlanks; i++) {
-    dayCells += `<span class="cal-day empty"></span>`;
-  }
+  for (let i = 0; i < leadingBlanks; i++) dayCells += `<span class="cal-day empty"></span>`;
   for (let day = 1; day <= daysInMonth; day++) {
     const cellDate = new Date(firstDay.getFullYear(), firstDay.getMonth(), day);
     const isPast = cellDate < today;
     const isToday = isSameDay(cellDate, today);
-    const isSelected = dtState.mode === 'date' && dtState.date && isSameDay(cellDate, dtState.date);
+    const isSelected = dtState.date && isSameDay(cellDate, dtState.date);
     const cls = ['cal-day'];
     if (isPast) cls.push('muted');
     if (isToday) cls.push('today');
@@ -321,15 +333,13 @@ function renderSheet() {
 
   sheet.innerHTML = `
     <div class="sheet-handle"></div>
-    <p class="sheet-title">Когда нужно сделать</p>
+    <p class="sheet-title">Срок выполнения</p>
 
     <div class="chip-row">
-      <button type="button" class="chip ${dtState.mode === 'asap' ? 'selected' : ''}" data-quick="asap">🚀 Как можно скорее</button>
-      <button type="button" class="chip ${dtState.mode === 'date' && dtState.date && isSameDay(dtState.date, today) ? 'selected' : ''}" data-quick="today">Сегодня</button>
-      <button type="button" class="chip ${dtState.mode === 'date' && dtState.date && isSameDay(dtState.date, tomorrow) ? 'selected' : ''}" data-quick="tomorrow">Завтра</button>
+      <button type="button" class="chip ${dtState.date && isSameDay(dtState.date, today) ? 'selected' : ''}" data-quick="today">Сегодня</button>
+      <button type="button" class="chip ${dtState.date && isSameDay(dtState.date, tomorrow) ? 'selected' : ''}" data-quick="tomorrow">Завтра</button>
     </div>
 
-    <p class="sheet-section-title">Дата</p>
     <div class="cal-head">
       <button type="button" class="cal-nav-btn" id="cal-prev" ${isCurrentMonth ? 'disabled' : ''}>‹</button>
       <span class="cal-month">${MONTHS_NOM[firstDay.getMonth()]} ${firstDay.getFullYear()}</span>
@@ -340,16 +350,8 @@ function renderSheet() {
       ${dayCells}
     </div>
 
-    <p class="sheet-section-title">Время (необязательно)</p>
-    <div class="chip-row">
-      ${TIME_PRESETS.map((t) => `<button type="button" class="chip ${dtState.time === t ? 'selected' : ''}" data-time="${t}">${t}</button>`).join('')}
-    </div>
-    <div class="time-custom">
-      <input type="time" id="time-custom-input" value="${dtState.time && !TIME_PRESETS.includes(dtState.time) ? dtState.time : ''}" placeholder="Своё время" />
-    </div>
-
     <div class="sheet-actions">
-      <button type="button" class="btn ghost" id="dt-clear">Очистить</button>
+      <button type="button" class="btn ghost" id="dt-clear">Без срока</button>
       <button type="button" class="btn primary" id="dt-done">Готово</button>
     </div>
   `;
@@ -357,104 +359,135 @@ function renderSheet() {
   sheet.querySelectorAll('[data-day]').forEach((btn) => {
     btn.addEventListener('click', () => {
       haptic('light');
-      dtState.mode = 'date';
       dtState.date = new Date(btn.dataset.day);
-      renderSheet();
+      renderDeadlineSheet();
     });
   });
-
   sheet.querySelectorAll('[data-quick]').forEach((btn) => {
     btn.addEventListener('click', () => {
       haptic('light');
-      const kind = btn.dataset.quick;
-      if (kind === 'asap') {
-        dtState.mode = dtState.mode === 'asap' ? null : 'asap';
-        dtState.date = null;
-      } else {
-        const target = kind === 'today' ? today : tomorrow;
-        dtState.mode = 'date';
-        dtState.date = target;
-        calViewMonth = startOfMonth(target);
-      }
-      renderSheet();
+      const target = btn.dataset.quick === 'today' ? today : tomorrow;
+      dtState.date = target;
+      calViewMonth = startOfMonth(target);
+      renderDeadlineSheet();
     });
   });
-
-  sheet.querySelectorAll('[data-time]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      haptic('light');
-      dtState.time = dtState.time === btn.dataset.time ? null : btn.dataset.time;
-      renderSheet();
-    });
-  });
-
-  document.getElementById('time-custom-input').addEventListener('change', (e) => {
-    dtState.time = e.target.value || null;
-  });
-
   document.getElementById('cal-prev').addEventListener('click', () => {
     calViewMonth = new Date(calViewMonth.getFullYear(), calViewMonth.getMonth() - 1, 1);
-    renderSheet();
+    renderDeadlineSheet();
   });
   document.getElementById('cal-next').addEventListener('click', () => {
     calViewMonth = new Date(calViewMonth.getFullYear(), calViewMonth.getMonth() + 1, 1);
-    renderSheet();
+    renderDeadlineSheet();
   });
-
   document.getElementById('dt-clear').addEventListener('click', () => {
-    resetDateTimeState();
+    resetDeadlineState();
     updateWhenFieldDisplay();
-    closeDateTimeSheet();
+    closeDeadlineSheet();
   });
   document.getElementById('dt-done').addEventListener('click', () => {
     updateWhenFieldDisplay();
-    closeDateTimeSheet();
+    closeDeadlineSheet();
   });
 }
 
 document.getElementById('sheet-overlay').addEventListener('click', (e) => {
-  if (e.target.id === 'sheet-overlay') closeDateTimeSheet();
+  if (e.target.id === 'sheet-overlay') closeDeadlineSheet();
 });
 
-/* ===================== Мои заказы ===================== */
+/* ===================== Директор: все задачи ===================== */
 
-async function renderMine() {
+async function renderAll() {
   view.innerHTML = '<p class="loading">Загрузка…</p>';
   try {
-    const orders = await api('/orders?scope=mine');
-    if (!orders.length) {
-      view.innerHTML = '<p class="empty">У вас пока нет заказов.</p>';
-      return;
-    }
-    view.innerHTML = `<div class="list">${orders.map((o) => orderCard(o, { showManage: true })).join('')}</div>`;
-    view.querySelectorAll('[data-done]').forEach((b) =>
-      b.addEventListener('click', () => updateStatus(b.dataset.done, 'done'))
-    );
-    view.querySelectorAll('[data-cancel]').forEach((b) =>
-      b.addEventListener('click', () => updateStatus(b.dataset.cancel, 'cancelled'))
-    );
+    const tasks = await api('/tasks');
+    const filterRow = `
+      <div class="chip-row" style="margin-bottom:14px;">
+        <button type="button" class="chip ${allFilter === 'all' ? 'selected' : ''}" data-filter="all">Все</button>
+        ${employees.map((n) => `<button type="button" class="chip ${allFilter === n ? 'selected' : ''}" data-filter="${escapeHtml(n)}">${escapeHtml(n)}</button>`).join('')}
+      </div>`;
+    const filtered = allFilter === 'all' ? tasks : tasks.filter((t) => t.assignee === allFilter);
+
+    view.innerHTML = filterRow + (filtered.length
+      ? `<div class="list">${filtered.map((t) => taskCard(t, { showAssignee: true, canChangeStatus: true, canCancel: true })).join('')}</div>`
+      : '<p class="empty">Задач пока нет.</p>');
+
+    view.querySelectorAll('[data-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        allFilter = btn.dataset.filter;
+        renderAll();
+      });
+    });
+    bindTaskCardEvents(view, renderAll);
   } catch (e) {
     view.innerHTML = `<p class="empty">Ошибка: ${escapeHtml(e.message)}</p>`;
   }
 }
 
-async function updateStatus(id, status) {
+/* ===================== Сотрудник: мои задачи ===================== */
+
+async function renderMine() {
+  view.innerHTML = '<p class="loading">Загрузка…</p>';
   try {
-    await api(`/orders/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) });
-    haptic('success');
-    showToast(status === 'done' ? 'Отмечено как выполнено' : 'Заказ отменён');
-    renderMine();
+    const tasks = await api('/tasks');
+    view.innerHTML = `<p class="whoami">Вы вошли как: <b>${escapeHtml(me.employee_name)}</b> · <button id="change-name">это не я</button></p>` + (tasks.length
+      ? `<div class="list">${tasks.map((t) => taskCard(t, { canChangeStatus: true, canCancel: false })).join('')}</div>`
+      : '<p class="empty">Пока нет задач для вас.</p>');
+    document.getElementById('change-name').addEventListener('click', async () => {
+      selectedAssignee = null;
+      me.employee_name = null;
+      renderOnboarding();
+    });
+    bindTaskCardEvents(view, renderMine);
   } catch (e) {
-    haptic('error');
-    showToast(e.message);
+    view.innerHTML = `<p class="empty">Ошибка: ${escapeHtml(e.message)}</p>`;
   }
 }
 
-(async () => {
-  try {
-    categories = await api('/categories');
-  } catch {
-    // используем CATEGORY_FALLBACK
+/* ===================== Навигация и запуск ===================== */
+
+function switchTab(tab) {
+  currentTab = tab;
+  tabbar.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  if (tab === 'assign') renderAssign();
+  if (tab === 'all') renderAll();
+}
+
+function setupUiForRole() {
+  if (me.isDirector) {
+    appSubtitle.textContent = 'Вы раздаёте задачи сотрудникам';
+    tabbar.hidden = false;
+    tabbar.innerHTML = `
+      <button class="tab-btn active" data-tab="assign"><span>➕</span><span>Раздать</span></button>
+      <button class="tab-btn" data-tab="all"><span>📋</span><span>Все задачи</span></button>
+    `;
+    tabbar.querySelectorAll('.tab-btn').forEach((btn) => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+    switchTab('assign');
+  } else {
+    appSubtitle.textContent = 'Ваши задачи от директора';
+    tabbar.hidden = true;
+    renderMine();
   }
-  renderFeed();
-})();
+}
+
+async function boot() {
+  view.innerHTML = '<p class="loading">Загрузка…</p>';
+  try {
+    employees = await api('/employees');
+    me = await api('/me');
+  } catch (e) {
+    view.innerHTML = `<p class="empty">Ошибка: ${escapeHtml(e.message)}</p>`;
+    return;
+  }
+
+  if (!me.isDirector && !me.employee_name) {
+    appSubtitle.textContent = 'Выберите, кто вы';
+    tabbar.hidden = true;
+    renderOnboarding();
+    return;
+  }
+
+  setupUiForRole();
+}
+
+boot();

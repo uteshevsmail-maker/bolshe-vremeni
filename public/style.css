@@ -380,3 +380,54 @@ html, body {
 
 .sheet-actions { display: flex; gap: 10px; margin-top: 18px; }
 .sheet-actions .btn { flex: 1; }
+
+/* ---------- Onboarding (выбор сотрудника) ---------- */
+
+.onboarding { text-align: center; padding: 20px 4px 0; }
+.onboarding .big-emoji { font-size: 40px; margin-bottom: 6px; }
+.onboarding h2 { margin: 0 0 6px; font-size: 19px; }
+.onboarding p { margin: 0 0 18px; color: var(--tg-hint); font-size: 14px; }
+
+.name-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.name-btn {
+  padding: 16px 8px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: var(--tg-secondary-bg);
+  color: var(--tg-text);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.12s ease;
+}
+.name-btn:active { transform: scale(0.95); }
+
+/* ---------- Задачи ---------- */
+
+.task-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; }
+.deadline { display: inline-flex; align-items: center; gap: 4px; }
+.deadline.overdue { color: #cf222e; font-weight: 700; }
+
+.comments { margin-top: 12px; border-top: 1px solid rgba(142, 142, 147, 0.18); padding-top: 10px; }
+.comment-item { font-size: 13px; line-height: 1.4; margin-bottom: 6px; }
+.comment-item b { font-weight: 700; }
+.comment-item .c-text { color: var(--tg-text); }
+.comment-form { display: flex; gap: 8px; margin-top: 8px; }
+.comment-form input {
+  flex: 1;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--tg-secondary-bg);
+  color: var(--tg-text);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.whoami { text-align: center; font-size: 12.5px; color: var(--tg-hint); margin: 0 0 12px; }
+.whoami button { border: none; background: none; color: var(--tg-link); font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 0; }
