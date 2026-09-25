@@ -7,6 +7,8 @@ const path = require('path');
 
 const DATA_FILE = path.join(__dirname, '..', 'data.json');
 
+const EMPLOYEES = ['Рената', 'Дарья', 'Замир', 'Маден', 'Асхат', 'Виктория'];
+
 function loadData() {
   if (fs.existsSync(DATA_FILE)) {
     try {
@@ -15,108 +17,124 @@ function loadData() {
       console.error('Не удалось прочитать data.json, начинаю с чистого файла:', e.message);
     }
   }
-  return { users: {}, orders: [], nextOrderId: 1 };
+  return { users: {}, tasks: [], nextTaskId: 1 };
 }
 
 const data = loadData();
+// На случай обновления со старой версии хранилища (заказы услуг).
+if (!Array.isArray(data.tasks)) data.tasks = [];
+if (!data.nextTaskId) data.nextTaskId = 1;
 
 function save() {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
 function upsertUser(user) {
+  const existing = data.users[user.id] || {};
   data.users[user.id] = {
     id: user.id,
     username: user.username || null,
     first_name: user.first_name || null,
     last_name: user.last_name || null,
+    employee_name: existing.employee_name || null,
   };
   save();
+  return data.users[user.id];
 }
 
 function getUser(id) {
   return data.users[id] || null;
 }
 
-function attachUsers(order) {
-  const customer = getUser(order.customer_id) || {};
-  const executor = order.executor_id ? getUser(order.executor_id) : null;
+function setEmployeeName(userId, name) {
+  if (!EMPLOYEES.includes(name)) return null;
+  const user = data.users[userId];
+  if (!user) return null;
+  user.employee_name = name;
+  save();
+  return user;
+}
+
+function attachAuthors(task) {
+  const author = getUser(task.created_by) || {};
   return {
-    ...order,
-    customer_username: customer.username || null,
-    customer_name: customer.first_name || null,
-    executor_username: executor ? executor.username || null : null,
-    executor_name: executor ? executor.first_name || null : null,
+    ...task,
+    created_by_name: author.first_name || null,
+    comments: (task.comments || []).map((c) => ({ ...c })),
   };
 }
 
-function createOrder({ customer_id, category, description, address, price, when_text }) {
+function createTask({ title, description, assignee, deadline, created_by }) {
   const now = new Date().toISOString();
-  const order = {
-    id: data.nextOrderId++,
-    customer_id,
-    executor_id: null,
-    category,
-    description,
-    address: address || null,
-    price: price || null,
-    when_text: when_text || null,
-    status: 'open',
+  const task = {
+    id: data.nextTaskId++,
+    title,
+    description: description || null,
+    assignee,
+    deadline: deadline || null,
+    status: 'new',
+    comments: [],
+    created_by,
     created_at: now,
     updated_at: now,
   };
-  data.orders.push(order);
+  data.tasks.push(task);
   save();
-  return attachUsers(order);
+  return attachAuthors(task);
 }
 
-function getOrder(id) {
-  const order = data.orders.find((o) => o.id === Number(id));
-  return order || null;
+function getTask(id) {
+  const task = data.tasks.find((t) => t.id === Number(id));
+  return task || null;
 }
 
-function listOpenOrders() {
-  return data.orders
-    .filter((o) => o.status === 'open')
+function listAllTasks() {
+  return data.tasks
     .slice()
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-    .map(attachUsers);
+    .map(attachAuthors);
 }
 
-function listMyOrders(userId) {
-  return data.orders
-    .filter((o) => o.customer_id === userId || o.executor_id === userId)
+function listTasksForEmployee(name) {
+  return data.tasks
+    .filter((t) => t.assignee === name)
     .slice()
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-    .map(attachUsers);
+    .map(attachAuthors);
 }
 
-function takeOrder(id, executorId) {
-  const order = getOrder(id);
-  if (!order) return null;
-  order.status = 'in_progress';
-  order.executor_id = executorId;
-  order.updated_at = new Date().toISOString();
+function setTaskStatus(id, status) {
+  const task = getTask(id);
+  if (!task) return null;
+  task.status = status;
+  task.updated_at = new Date().toISOString();
   save();
-  return attachUsers(order);
+  return attachAuthors(task);
 }
 
-function setOrderStatus(id, status) {
-  const order = getOrder(id);
-  if (!order) return null;
-  order.status = status;
-  order.updated_at = new Date().toISOString();
+function addComment(id, { author_id, author_name, text }) {
+  const task = getTask(id);
+  if (!task) return null;
+  task.comments.push({
+    author_id,
+    author_name: author_name || 'Пользователь',
+    text,
+    at: new Date().toISOString(),
+  });
+  task.updated_at = new Date().toISOString();
   save();
-  return attachUsers(order);
+  return attachAuthors(task);
 }
 
 module.exports = {
+  EMPLOYEES,
   upsertUser,
   getUser,
-  createOrder,
-  getOrder,
-  listOpenOrders,
-  listMyOrders,
-  takeOrder,
-  setOrderStatus,
+  setEmployeeName,
+  createTask,
+  getTask,
+  listAllTasks,
+  listTasksForEmployee,
+  setTaskStatus,
+  addComment,
 };

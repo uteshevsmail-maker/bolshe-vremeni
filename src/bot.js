@@ -11,7 +11,7 @@ function createBot() {
   const bot = new Telegraf(token);
 
   const openAppKeyboard = Markup.inlineKeyboard([
-    Markup.button.webApp('🚀 Открыть «Больше времени»', webAppUrl),
+    Markup.button.webApp('📋 Открыть «Задачи»', webAppUrl),
   ]);
 
   bot.start(async (ctx) => {
@@ -19,10 +19,9 @@ function createBot() {
       [
         'Привет! 👋',
         '',
-        '«Больше времени» — сервис бытовых поручений: выгулять собаку, забрать',
-        'посылку с ПВЗ, сходить в магазин, постоять в очереди и другие мелкие дела.',
-        '',
-        'Опубликуйте заказ или откликнитесь на чужой — прямо в мини-приложении.',
+        '«Задачи» — раздача поручений сотрудникам: директор ставит задачу',
+        'конкретному человеку, сотрудник видит её, берёт в работу, отмечает',
+        'выполнение и может оставить комментарий — всё в мини-приложении.',
       ].join('\n'),
       openAppKeyboard
     );
@@ -32,9 +31,13 @@ function createBot() {
     await ctx.reply('Открыть приложение:', openAppKeyboard);
   });
 
+  bot.command('id', async (ctx) => {
+    await ctx.reply(`Ваш Telegram ID: ${ctx.from.id}`);
+  });
+
   bot.help(async (ctx) => {
     await ctx.reply(
-      'Команды:\n/start — начать\n/app — открыть мини-приложение',
+      'Команды:\n/start — начать\n/app — открыть мини-приложение\n/id — узнать свой Telegram ID',
       openAppKeyboard
     );
   });
@@ -42,7 +45,7 @@ function createBot() {
   // Кнопка меню рядом с полем ввода — открывает Mini App в один тап
   bot.telegram
     .setChatMenuButton({
-      menuButton: { type: 'web_app', text: 'Больше времени', web_app: { url: webAppUrl } },
+      menuButton: { type: 'web_app', text: 'Задачи', web_app: { url: webAppUrl } },
     })
     .catch((e) => console.error('Не удалось установить menu button:', e.message));
 

@@ -2,12 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const { createBot } = require('./bot');
-const ordersRouter = require('./routes/orders');
+const tasksRouter = require('./routes/tasks');
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
-app.use('/api', ordersRouter);
+app.use('/api', tasksRouter);
 
 const PORT = process.env.PORT || 3000;
 
